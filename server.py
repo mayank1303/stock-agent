@@ -194,27 +194,31 @@ def stock_return(ticker: str, period: str = None) -> dict:
 def screen_stock_universe(
     universe: str = "nifty50",
     period: str = "1M",
-    direction: str = "down",
-    threshold: float = 10.0,
+    direction: str = None,
+    threshold: float = 0.0,
 ) -> dict:
     """
-    Screen a group of stocks for ones matching a return condition.
-    Use this for questions like "which Nifty50 stocks are down more
-    than 10% this month" or "which stocks are up over 5% this year".
+    Get returns for a group of stocks. THREE modes:
+    (1) Omit direction/threshold entirely to list ALL stocks in the
+        universe with their returns, sorted best-to-worst - use this
+        for "show me all Nifty50 stocks' performance" style questions.
+    (2) direction="down" + threshold to find losers below a % drop.
+    (3) direction="up" + threshold to find gainers above a % rise.
+
+    IMPORTANT: this is the ONLY correct way to answer questions about
+    multiple/all stocks in an index. Never call stock_return
+    individually in a loop for each stock you think is in the index -
+    you do not reliably know the current, correct constituent list
+    (it changes, and tickers recalled from memory are often outdated).
 
     Args:
-        universe: which group of stocks to screen. Currently supported:
-            "nifty50". More will be added as the project expands
-            (e.g. "nifty500", "us_sp500").
+        universe: which group of stocks. Currently supported: "nifty50".
         period: one of "1W", "1M", "3M", "6M", "YTD", "1Y"
-        direction: "down" for losers, "up" for gainers
-        threshold: minimum % move to qualify (always given as a
-            positive number, e.g. 10.0 means "at least 10%", regardless
-            of direction)
+        direction: "down" for losers, "up" for gainers, omit for all
+        threshold: minimum % move to qualify (only used if direction given)
 
-    Returns a list of matching stocks sorted by biggest movers first,
-    plus the count. If the universe name isn't recognized, returns an
-    error instead of guessing.
+    Returns all matching/listed stocks plus the count. If the universe
+    name isn't recognized, returns an error instead of guessing.
     """
     ticker_list = UNIVERSES.get(universe.lower())
     if ticker_list is None:
@@ -231,7 +235,7 @@ def screen_stock_universe(
     return {
         "universe": universe,
         "period": period,
-        "direction": direction,
+        "direction": direction or "none (all stocks, unfiltered)",
         "threshold": threshold,
         "match_count": len(results),
         "matches": results,

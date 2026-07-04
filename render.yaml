@@ -1,0 +1,30 @@
+# Render deployment config for the FastAPI backend.
+#
+# Deploy steps (do this in the Render dashboard, not via CLI):
+#   1. Push this project to GitHub (if not already).
+#   2. On render.com: New -> Blueprint -> connect your GitHub repo.
+#      Render reads this file automatically and configures the service.
+#   3. Add your real secret in the Render dashboard (Environment tab):
+#        ANTHROPIC_API_KEY = <your real key>
+#      Never put the real key in this file - it's committed to GitHub.
+#   4. Deploy. Render gives you a URL like https://stock-agent-xxxx.onrender.com
+#
+# KNOWN LIMITATION (free tier): no persistent disk. db/prices.db and
+# db/sessions.db reset on every restart/redeploy, and the free service
+# spins down after ~15 min of inactivity (first request after that
+# takes ~1 min to wake up). Acceptable for personal/demo use; upgrade
+# to a paid instance type with a persistent disk if this becomes
+# annoying (see Render's disk add-on docs).
+
+services:
+  - type: web
+    name: stock-agent-backend
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn backend.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false  # set manually in the Render dashboard, not here
+      - key: AGENT_MODEL
+        value: claude-haiku-4-5-20251001

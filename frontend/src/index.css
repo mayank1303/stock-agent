@@ -1,0 +1,480 @@
+/* ---------------------------------------------------------------
+   Stock Agent — terminal-inspired design system
+   Palette:
+     --ink        #0B1020  deep ink blue (terminal background)
+     --panel      #121A30  raised surfaces
+     --line       #1F2A48  hairline borders
+     --text       #E8EAF2  primary text
+     --muted      #8A93AD  secondary text
+     --amber      #F5B841  ticker-board amber (agent identity)
+     --up         #34D399  market green (gains only)
+     --down       #F87171  market red (losses only)
+   Type:
+     IBM Plex Sans  — chat prose
+     IBM Plex Mono  — tickers, numbers, tool chips, header
+---------------------------------------------------------------- */
+
+:root {
+  --ink: #0b1020;
+  --panel: #121a30;
+  --line: #1f2a48;
+  --text: #e8eaf2;
+  --muted: #8a93ad;
+  --amber: #f5b841;
+  --up: #34d399;
+  --down: #f87171;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  background: var(--ink);
+  color: var(--text);
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+.app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+/* ---- header: ticker-board strip ---- */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--ink);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 18px 4px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.header h1 {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--amber);
+  text-transform: uppercase;
+}
+
+.header h1::before {
+  content: "▮ ";
+  animation: blink 1.4s steps(1) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header h1::before {
+    animation: none;
+  }
+}
+
+.header .sub {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+}
+
+.header button {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  background: none;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+
+.header button:hover {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+
+.header button:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+/* ---- message list ---- */
+.messages {
+  flex: 1;
+  padding: 20px 4px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* keeps the last message visible above the sticky input bar instead of
+   being tucked directly underneath it */
+.messages > div:last-child {
+  scroll-margin-bottom: 90px;
+}
+
+.msg {
+  max-width: 78%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.msg.user {
+  align-self: flex-end;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+
+.msg.assistant {
+  align-self: flex-start;
+  background: none;
+  padding-left: 0;
+}
+
+/* stock numbers inside answers read better in mono; the model's
+   markdown-ish output stays plain text for v1 */
+.msg.assistant {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- markdown content (tables, bold, lists) rendered inside answers ---- */
+.msg.assistant p {
+  margin: 0 0 10px;
+}
+.msg.assistant p:last-child {
+  margin-bottom: 0;
+}
+
+.msg.assistant strong {
+  color: var(--amber);
+  font-weight: 600;
+}
+
+.msg.assistant ul,
+.msg.assistant ol {
+  margin: 0 0 10px 20px;
+}
+
+.msg.assistant code {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  background: var(--panel);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.msg.assistant table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0 14px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+}
+
+.msg.assistant th {
+  text-align: left;
+  color: var(--amber);
+  font-weight: 600;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.msg.assistant td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+}
+
+.msg.assistant tr:last-child td {
+  border-bottom: none;
+}
+
+/* horizontal scroll on mobile instead of squashing/breaking a wide table */
+.msg.assistant {
+  overflow-x: auto;
+  position: relative;
+}
+
+/* ---- copy button: subtle, appears on the assistant bubble ---- */
+.copy-btn {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.copy-btn:hover {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+
+.copy-btn:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+/* ---- thinking indicator: shown in the gap before the first chunk arrives ---- */
+.thinking {
+  display: flex;
+  gap: 5px;
+  align-self: flex-start;
+  padding: 8px 4px;
+}
+
+.thinking .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--amber);
+  opacity: 0.4;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.thinking .dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.thinking .dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+@keyframes pulse {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking .dot { animation: none; opacity: 0.7; }
+}
+
+/* ---- stop button: same slot as send, different intent ---- */
+.stop-btn {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  background: none;
+  color: var(--down);
+  border: 1px solid var(--down);
+  border-radius: 8px;
+  padding: 0 20px;
+  cursor: pointer;
+}
+
+.stop-btn:hover {
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.stop-btn:focus-visible {
+  outline: 2px solid var(--down);
+  outline-offset: 2px;
+}
+
+/* ---- retry button inside the error banner ---- */
+.retry-btn {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: none;
+  border: 1px solid var(--down);
+  color: var(--down);
+  border-radius: 4px;
+  padding: 3px 10px;
+  margin-left: 10px;
+  cursor: pointer;
+}
+
+.retry-btn:hover {
+  background: rgba(248, 113, 113, 0.1);
+}
+
+/* ---- tool chip: the "order slip" signature element ---- */
+.tool-chip {
+  align-self: flex-start;
+  max-width: 100%;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11.5px;
+  color: var(--amber);
+  background: rgba(245, 184, 65, 0.07);
+  border: 1px dashed rgba(245, 184, 65, 0.4);
+  border-radius: 6px;
+  padding: 6px 10px;
+  letter-spacing: 0.03em;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.tool-chip .args {
+  color: var(--muted);
+}
+
+.tool-chip.running::after {
+  content: " …";
+  animation: blink 1s steps(1) infinite;
+}
+
+/* ---- empty state ---- */
+.empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--muted);
+}
+
+.empty .board {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  color: var(--amber);
+}
+
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  max-width: 560px;
+}
+
+.suggestions button {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.suggestions button:hover {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.suggestions button:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+/* ---- input bar ---- */
+.input-bar {
+  position: sticky;
+  bottom: 0;
+  background: var(--ink);
+  display: flex;
+  gap: 10px;
+  padding: 14px 4px 20px;
+  border-top: 1px solid var(--line);
+}
+
+.input-bar input {
+  flex: 1;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 15px;
+  padding: 11px 14px;
+}
+
+.input-bar input::placeholder {
+  color: var(--muted);
+}
+
+.input-bar input:focus {
+  outline: none;
+  border-color: var(--amber);
+}
+
+.input-bar button {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  background: var(--amber);
+  color: var(--ink);
+  border: none;
+  border-radius: 8px;
+  padding: 0 20px;
+  cursor: pointer;
+}
+
+.input-bar button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.input-bar button:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: 2px;
+}
+
+/* ---- error banner ---- */
+.error {
+  align-self: center;
+  color: var(--down);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: 6px;
+  padding: 8px 12px;
+}
+
+@media (max-width: 600px) {
+  .msg {
+    max-width: 92%;
+  }
+  .header {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    row-gap: 4px;
+  }
+  .header .sub {
+    display: none;
+  }
+  .header h1 {
+    font-size: 13px;
+  }
+  .input-bar button {
+    padding: 0 14px;
+  }
+}

@@ -323,21 +323,27 @@ def get_return(ticker: str, period: str | None = None) -> dict:
     }
 
 
-def screen_stocks(universe: list[str], period: str = "1M", direction: str = "down", threshold: float = 10.0) -> list[dict]:
+def screen_stocks(universe: list[str], period: str = "1M", direction: str | None = None, threshold: float = 0.0) -> list[dict]:
     """
-    Screen a universe of tickers by period return.
+    Screen (or simply list) a universe of tickers by period return.
 
-    direction: "down" -> pct_change <= -threshold
-               "up"   -> pct_change >= threshold
-    Returns results sorted by magnitude (biggest movers first).
+    direction: "down" -> only stocks with pct_change <= -threshold
+               "up"   -> only stocks with pct_change >= threshold
+               None   -> NO FILTER: return every stock in the universe
+                         with its return, sorted best-to-worst. Use this
+                         for "show me all Nifty50 stocks' performance"
+                         style questions, as opposed to "which stocks
+                         are down more than X%" style filtering.
+    Returns results sorted by return (descending) when direction is
+    None or "up"; ascending (worst first) when direction is "down".
     Tickers that fail to fetch are silently skipped (logged in data_fetch).
 
     Raises ValueError for an invalid direction or a negative threshold -
     deliberately loud instead of silently returning an empty list, which
     would look identical to "ran fine, nothing matched".
     """
-    if direction not in ("down", "up"):
-        raise ValueError(f"direction must be 'down' or 'up', got '{direction}'")
+    if direction is not None and direction not in ("down", "up"):
+        raise ValueError(f"direction must be 'down', 'up', or omitted entirely, got '{direction}'")
     if threshold < 0:
         raise ValueError(f"threshold must be >= 0 (it's a magnitude, direction is separate), got {threshold}")
 
@@ -351,11 +357,13 @@ def screen_stocks(universe: list[str], period: str = "1M", direction: str = "dow
         r = get_return(ticker, period)
         if "error" in r:
             continue
-        if direction == "down" and r["pct_change"] <= -abs(threshold):
+        if direction is None:
+            results.append(r)
+        elif direction == "down" and r["pct_change"] <= -abs(threshold):
             results.append(r)
         elif direction == "up" and r["pct_change"] >= abs(threshold):
             results.append(r)
 
-    reverse = direction == "up"
+    reverse = direction != "down"  # descending unless explicitly screening for losers
     results.sort(key=lambda r: r["pct_change"], reverse=reverse)
     return results
