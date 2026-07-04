@@ -1,5 +1,16 @@
 # Deployment Guide (Phase 4)
 
+# Deployment Guide (Phase 4)
+
+**Status: paused.** Deployed successfully to Render + Vercel, but
+yfinance gets rate-limited on Render's shared IPs (`YFRateLimitError:
+Too Many Requests` on every request) — confirmed in production, not
+just a risk. See README's Known Limitations for the full writeup. The
+app runs correctly on localhost; this guide is kept for when the data
+layer is swapped to a licensed API (Finnhub/Alpha Vantage) for the
+hosted path, or if intermittent yfinance failures become acceptable
+for demo purposes.
+
 Backend -> Render (free tier). Frontend -> Vercel (free tier).
 
 **Known limitation of this setup**: Render's free tier has no persistent
