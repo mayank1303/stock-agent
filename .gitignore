@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+*.pyc
+db/prices.db
+tool_calls.log
+.env
+.DS_Store
