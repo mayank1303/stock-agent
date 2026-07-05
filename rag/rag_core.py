@@ -33,8 +33,35 @@ import io
 import logging
 import os
 import re
+import signal
 import socket
+from contextlib import contextmanager
 from pathlib import Path
+
+
+class _TimeoutError(Exception):
+    pass
+
+
+@contextmanager
+def _timeout(seconds: int):
+    """
+    Hard timeout for a block of code, using SIGALRM (Unix/macOS only -
+    fine for this project). Added after real testing showed a single
+    corrupted PDF page could make the OCR rendering step (which shells
+    out to poppler) hang for minutes with zero progress output,
+    indistinguishable from a true infinite hang without a hard limit.
+    """
+    def _handler(signum, frame):
+        raise _TimeoutError(f"Timed out after {seconds}s")
+
+    old_handler = signal.signal(signal.SIGALRM, _handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
 
 import chromadb
 import pytesseract
@@ -191,19 +218,43 @@ def extract_pdf_text(pdf_path: Path) -> str:
     skip_image_ocr = False
 
     for page_num, page in enumerate(reader.pages):
-        text = page.extract_text() or ""
+        if page_num % 10 == 0:
+            logger.info(f"  Processing page {page_num + 1}/{len(reader.pages)} of {pdf_path.name}...")
+
+        # page.extract_text() itself can raise on malformed content
+        # (confirmed via real testing: a PdfReadError on a broken
+        # inline image embedded directly in the page's content stream
+        # crashed the whole ingestion run). Catch it here and treat
+        # this page as empty text - the scanned-page OCR fallback right
+        # below will then try to recover it via page image rendering
+        # instead, same as it already does for genuinely blank pages.
+        try:
+            text = page.extract_text() or ""
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Normal text extraction crashed on page {page_num + 1} of {pdf_path.name}: {e}. "
+                             f"Falling back to OCR for this page.")
+            text = ""
 
         # Fallback 1: page looks scanned (suspiciously little/no text) -
-        # render the whole page as an image and OCR it.
+        # render the whole page as an image and OCR it. Wrapped in a
+        # hard 30s timeout: confirmed via real testing that a corrupted
+        # PDF can make poppler's rendering (convert_from_path shells out
+        # to it) hang for minutes with zero progress output on a single
+        # bad page, indistinguishable from a true infinite hang without
+        # this limit.
         if len(text.strip()) < MIN_TEXT_LEN_BEFORE_OCR_FALLBACK:
             try:
-                rendered_pages = convert_from_path(
-                    str(pdf_path), first_page=page_num + 1, last_page=page_num + 1
-                )
+                with _timeout(30):
+                    rendered_pages = convert_from_path(
+                        str(pdf_path), first_page=page_num + 1, last_page=page_num + 1
+                    )
                 if rendered_pages:
                     ocr_text = _ocr_image(rendered_pages[0])
                     if ocr_text:
                         text = ocr_text
+            except _TimeoutError:
+                logger.warning(f"Page-level OCR fallback TIMED OUT (>30s) on page {page_num + 1} "
+                                 f"of {pdf_path.name} - skipping this page's OCR, moving on.")
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"Page-level OCR fallback failed on page {page_num + 1} of {pdf_path.name}: {e}")
 
