@@ -126,16 +126,67 @@ config snippet.
   supported *filtered* queries at the time. Root-caused and fixed by
   making the tool capable of answering the actual question, rather
   than assuming the model was just being unreliable.
+- **yfinance is unreliable on cloud-hosted IPs — confirmed in production,
+  not just a theoretical risk**: deployed to Render and immediately hit
+  `YFRateLimitError: Too Many Requests` on every request, while the
+  identical code works perfectly on a home laptop. This is a known,
+  widely-reported yfinance limitation (see yfinance GitHub issues
+  #2125, #2411, #2422) — Yahoo Finance is an unofficial, unlicensed
+  data source (scraped, not a real API), and it rate-limits/blocks
+  shared datacenter IP ranges (Render, AWS, Streamlit Cloud, etc.)
+  far more aggressively than residential IPs. Tried a browser-like
+  User-Agent header as a documented mitigation — did not help; Yahoo
+  appears to be blocking by request volume/pattern on the IP itself,
+  not just header fingerprinting.
+  **Current status**: paused the public deployment rather than ship a
+  visibly broken hosted demo. The project runs reliably on localhost
+  (laptop IP isn't rate-limited). Revisiting hosted deployment later
+  requires either accepting intermittent failures with a fallback
+  message, or switching the data layer to a licensed API (Finnhub,
+  Alpha Vantage) for the hosted path specifically — a real, scoped
+  follow-up, not a quick fix.
 - **Free-tier hosting has no persistent disk** (see DEPLOYMENT.md) -
   the price cache and chat history reset on backend restarts/redeploys.
 - **Not financial advice**: this is an analysis/screening tool. It
   deliberately avoids "buy/sell" recommendations by design.
 
+## Phase 5 findings: local LLM vs Claude API
+
+Benchmarked `qwen2.5:7b` (via Ollama, local M4 MacBook Air) against
+Claude Haiku on the same 9-question eval set (`eval_local_llm.py` vs
+`eval_automated.py`):
+
+| | Claude Haiku (API) | qwen2.5:7b (local) |
+|---|---|---|
+| Tool routing accuracy | 9/9 | 9/9 |
+| Strict output formatting compliance | Reliable | Unreliable |
+| Avg latency | ~1-2s | ~9.3s |
+| Cost | Fractions of a cent | $0 |
+
+**Takeaway**: contrary to my initial expectation (smaller open-source
+models are typically less reliable at tool-calling), qwen2.5:7b
+matched Claude's routing accuracy on this eval set, including
+correctly handling the "just estimate, don't check" guardrail
+question. The real, measured tradeoff is latency (~5-9x slower
+locally), not correctness on routing — at least on this small sample.
+
+A second, separate finding emerged later from real usage (the news
+feature): tool-routing accuracy and strict output-formatting compliance
+are NOT the same capability. Asked to format news as a mandatory table
+with a specific column structure (including a Date column), Claude
+complied correctly on the first try; qwen2.5:7b dropped the required
+Date column and used a bulleted list instead, even after the system
+prompt was strengthened with an explicit, mechanical template (not
+just a stated preference). This held even though the same local model
+routes tools perfectly — it "knows" which data to fetch, but is less
+reliable about exactly how to present it. A larger, more adversarial
+eval set would be needed to say this conclusively; this is a
+directional signal from real usage, not a formal benchmark result.
+
 ## Roadmap
 
-- Phase 5: benchmark this agent against a local open-source LLM
-  (Ollama) on the same eval set - compare accuracy, tool-calling
-  reliability, and cost tradeoffs
 - Expand beyond Nifty50 (Nifty500, US markets)
 - Classical ML forecasting layer (time-series / tree-based models)
   alongside the LLM reasoning layer
+- Larger, more adversarial eval set (current one is 9-20 questions;
+  a rigorous benchmark needs more, especially edge cases)

@@ -18,6 +18,7 @@ from tools import (
     get_high_low,
     get_return,
     get_stock_info,
+    get_stock_news,
     get_stock_snapshot,
     screen_stocks,
 )
@@ -28,6 +29,15 @@ if __name__ == "__main__":
 
     print("\n=== Company info snapshot (RELIANCE.NS) ===")
     print(get_stock_info("RELIANCE.NS"))
+
+    print("\n=== NEW: Recent news (TRENT.NS, default 2D) ===")
+    print(get_stock_news("TRENT.NS"))
+
+    print("\n=== NEW: Recent news (RELIANCE.NS, last 10 days) ===")
+    print(get_stock_news("RELIANCE.NS", period="10D"))
+
+    print("\n=== NEW: Recent news (RELIANCE.NS, YTD - 'major news this year') ===")
+    print(get_stock_news("RELIANCE.NS", period="YTD"))
 
     print("\n=== Single ticker checks (RELIANCE.NS) ===")
     print("True ATH (all history):", get_all_time_high("RELIANCE.NS"))

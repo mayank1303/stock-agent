@@ -28,12 +28,14 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 from data.nifty50 import NIFTY50
+from rag.rag_core import search_books
 from tools import (
     get_all_time_high,
     get_all_time_low,
     get_high_low,
     get_return,
     get_stock_info,
+    get_stock_news,
     get_stock_snapshot,
     screen_stocks,
 )
@@ -114,6 +116,27 @@ def stock_info(ticker: str) -> dict:
         ticker: NSE ticker with .NS suffix, e.g. "RELIANCE.NS", "TCS.NS"
     """
     return get_stock_info(ticker)
+
+
+@mcp.tool()
+@logged_tool
+def stock_news(ticker: str, period: str = "2D") -> dict:
+    """
+    Get recent news headlines for an NSE stock over a period. Use for
+    questions like "any news on X today", "news on X in the last 5
+    days", "major news for X this year".
+
+    Returns headline + publisher + link + date only - never full
+    article text. If there's genuinely no recent news, that's a normal
+    result, not an error.
+
+    Args:
+        ticker: NSE ticker with .NS suffix, e.g. "TRENT.NS"
+        period: flexible - custom windows like "2D" (default)/"5D"/
+            "10D", presets ("1W", "1M", "3M", "6M", "YTD" for "this
+            year", "1Y"), or a specific date like "2024-01-01"
+    """
+    return get_stock_news(ticker, period)
 
 
 @mcp.tool()
@@ -239,6 +262,44 @@ def screen_stock_universe(
         "threshold": threshold,
         "match_count": len(results),
         "matches": results,
+    }
+
+
+@mcp.tool()
+@logged_tool
+def book_search(query: str, top_k: int = 5) -> dict:
+    """
+    Search your personal trading book library for relevant passages on
+    a strategy, pattern, indicator, or concept. Use this for questions
+    about trading knowledge/frameworks rather than live market data -
+    e.g. "what does my books say about position sizing", "entry rules
+    for a breakout pattern". Combine with live stock tools when
+    relevant (check a stock's real data AND what the books say about
+    the pattern it's showing).
+
+    Args:
+        query: concept/pattern/question to search for, not a ticker
+        top_k: how many passages to retrieve, default 5
+
+    Returns an empty result with a note if no books have been ingested
+    yet (run: python3 -m rag.ingest_books) - a normal state, not an error.
+    """
+    hits = search_books(query, top_k=top_k)
+    if not hits:
+        return {
+            "query": query,
+            "count": 0,
+            "results": [],
+            "note": "No results - either no books have been ingested yet "
+                     "(run: python3 -m rag.ingest_books) or nothing relevant was found.",
+        }
+    return {
+        "query": query,
+        "count": len(hits),
+        "results": [
+            {"book": h["book"], "passage": h["text"], "relevance_distance": round(h["distance"], 3)}
+            for h in hits
+        ],
     }
 
 

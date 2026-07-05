@@ -7,11 +7,12 @@ script/REPL, before wrapping anything in an agent. Phase 1 will wrap
 these as LangGraph tools without changing their logic.
 """
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 import re
 
 from data_fetch import FetchError, get_history, get_history_bulk
 from data_fetch import get_stock_info as _get_stock_info
+from data_fetch import get_stock_news as _get_stock_news
 
 
 def _safe_get_history(ticker: str):
@@ -46,6 +47,58 @@ def get_stock_info(ticker: str) -> dict:
         return _get_stock_info(ticker)
     except FetchError as e:
         return {"ticker": ticker, "error": str(e)}
+
+
+def get_stock_news(ticker: str, period: str = "2D") -> dict:
+    """
+    Get recent news headlines for a stock, filtered to a period.
+
+    period: flexible - same format as get_return/get_high_low:
+      - custom windows: "2D" (default), "5D", "10D" - "last N days"
+      - presets: "1W", "1M", "3M", "6M", "YTD" (e.g. "major news this
+        year"), "1Y"
+      - a specific date: "2024-01-01" (news since that date)
+
+    Returns headline + publisher + link + date only, never full
+    article text. If no news falls within the window, returns an empty
+    list with a note - a normal, valid outcome (not every stock has
+    fresh news every day), not an error.
+    """
+    try:
+        all_news = _get_stock_news(ticker)
+    except FetchError as e:
+        return {"ticker": ticker, "error": str(e)}
+
+    start_date = _period_start_date(period)
+    if start_date is None:
+        return {
+            "ticker": ticker,
+            "error": f"Could not understand period '{period}'. Use a custom window like "
+                     f"'2D'/'5D'/'10D', a preset ({ALL_PERIODS}), or a specific date like '2024-01-01'.",
+        }
+    cutoff = datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc)
+
+    recent = [
+        {
+            "title": item["title"],
+            "publisher": item["publisher"],
+            "link": item["link"],
+            # Readable "04 Jul 2026" format instead of a full ISO
+            # timestamp - easier for the model to reliably carry
+            # through into its answer without garbling or dropping it.
+            "published_date": item["published_at"].strftime("%d %b %Y") if item["published_at"] else "unknown",
+        }
+        for item in all_news
+        if item["published_at"] is None or item["published_at"] >= cutoff
+    ]
+
+    return {
+        "ticker": ticker,
+        "period": period,
+        "count": len(recent),
+        "news": recent,
+        "note": None if recent else f"No news found for {ticker} in the period '{period}'.",
+    }
 
 
 NIFTY50_INDEX_TICKER = "^NSEI"  # the Nifty 50 index itself, for comparison

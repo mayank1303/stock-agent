@@ -6,13 +6,28 @@ crashing the whole screen when one ticker fails.
 
 import logging
 import time
+from datetime import datetime, timezone
 
+import requests
 import yfinance as yf
 
 from db import get_connection, is_cache_fresh, load_prices, save_prices
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("data_fetch")
+
+# Yahoo Finance rate-limits more aggressively on shared/datacenter IPs
+# (cloud hosts like Render, Streamlit Cloud, AWS all report this - see
+# yfinance GitHub issues #2125, #2411, #2422). yfinance's default
+# requests look more "bot-like"; a standard browser User-Agent
+# sometimes avoids triggering that defense. Not a guaranteed fix (Yahoo
+# can still block by volume/IP regardless), but a real, documented,
+# safe thing to try before reaching for a paid data API.
+_session = requests.Session()
+_session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                  "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+})
 
 
 class FetchError(Exception):
@@ -27,7 +42,7 @@ def _fetch_from_yfinance(ticker: str, retries: int = 2, backoff: float = 1.5):
     last_exc = None
     for attempt in range(retries + 1):
         try:
-            df = yf.Ticker(ticker).history(period="max", interval="1d")
+            df = yf.Ticker(ticker, session=_session).history(period="max", interval="1d")
             if df.empty:
                 raise FetchError(f"No data returned for {ticker} (possibly delisted or invalid ticker)")
             return df
@@ -37,6 +52,76 @@ def _fetch_from_yfinance(ticker: str, retries: int = 2, backoff: float = 1.5):
             if attempt < retries:
                 time.sleep(backoff ** attempt)
     raise FetchError(f"Failed to fetch {ticker} after {retries + 1} attempts: {last_exc}")
+
+
+def get_stock_news(ticker: str, retries: int = 2, backoff: float = 1.5) -> list:
+    """
+    Fetch recent news headlines for a ticker via yfinance's built-in
+    .news property. Returns a list of dicts with title/publisher/link/
+    published_at only - never full article text (keeps us clean on
+    copyright, and yfinance's .news doesn't give full article bodies
+    anyway, just metadata + a link to the source).
+
+    Defensive extraction: yfinance's .news response shape has changed
+    across versions before (sometimes flat, sometimes nested under a
+    "content" key). This tries a few known shapes rather than assuming
+    one - if your installed yfinance version returns something
+    different, this is the first place to look.
+    """
+    last_exc = None
+    for attempt in range(retries + 1):
+        try:
+            raw_items = yf.Ticker(ticker, session=_session).news or []
+            results = []
+            for item in raw_items:
+                # Some yfinance versions nest the actual fields under "content"
+                content = item.get("content", item)
+                title = content.get("title") or item.get("title")
+                publisher = (
+                    content.get("provider", {}).get("displayName")
+                    if isinstance(content.get("provider"), dict)
+                    else item.get("publisher")
+                )
+                link = (
+                    content.get("canonicalUrl", {}).get("url")
+                    if isinstance(content.get("canonicalUrl"), dict)
+                    else item.get("link")
+                )
+                # publish time: unix timestamp (older shape) or ISO string (newer shape)
+                # Always produce a timezone-AWARE datetime (UTC) here -
+                # mixing naive and aware datetimes crashes on comparison
+                # later (found via real testing: "can't compare
+                # offset-naive and offset-aware datetimes" - yfinance's
+                # ISO strings carry a UTC offset, but datetime.fromtimestamp()
+                # defaults to naive, so the two branches disagreed).
+                pub_time = item.get("providerPublishTime") or content.get("pubDate")
+                if isinstance(pub_time, (int, float)):
+                    published_at = datetime.fromtimestamp(pub_time, tz=timezone.utc)
+                elif isinstance(pub_time, str):
+                    try:
+                        published_at = datetime.fromisoformat(pub_time.replace("Z", "+00:00"))
+                        if published_at.tzinfo is None:
+                            published_at = published_at.replace(tzinfo=timezone.utc)
+                    except ValueError:
+                        published_at = None
+                else:
+                    published_at = None
+
+                if title:
+                    results.append({
+                        "title": title,
+                        "publisher": publisher or "unknown",
+                        "link": link,
+                        "published_at": published_at,
+                    })
+            return results
+        except Exception as e:  # noqa: BLE001
+            last_exc = e
+            logger.warning(f"News fetch attempt {attempt + 1} failed for {ticker}: {e}")
+            if attempt < retries:
+                time.sleep(backoff ** attempt)
+
+    raise FetchError(f"Failed to fetch news for {ticker} after {retries + 1} attempts: {last_exc}")
 
 
 def get_stock_info(ticker: str, retries: int = 2, backoff: float = 1.5) -> dict:
@@ -52,7 +137,7 @@ def get_stock_info(ticker: str, retries: int = 2, backoff: float = 1.5) -> dict:
     last_exc = None
     for attempt in range(retries + 1):
         try:
-            info = yf.Ticker(ticker).info
+            info = yf.Ticker(ticker, session=_session).info
             if not info or info.get("regularMarketPrice") is None and info.get("currentPrice") is None:
                 raise FetchError(f"No quote info returned for {ticker} (possibly invalid ticker)")
 

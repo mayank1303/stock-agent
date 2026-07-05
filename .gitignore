@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 db/prices.db
 db/sessions.db
+db/chroma/
+books/*.pdf
+books/*.epub
 tool_calls.log
 .env
 .DS_Store
