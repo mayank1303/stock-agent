@@ -824,6 +824,94 @@ body {
   cursor: pointer;
 }
 
+/* ---- image upload: attach button, preview strip, in-message image ---- */
+.input-bar-wrap {
+  position: sticky;
+  bottom: 0;
+  background: var(--ink);
+}
+
+.attach-btn {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 20px;
+  font-weight: 400;
+  background: none;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  width: 44px;
+  cursor: pointer;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.attach-btn:hover {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+
+.attach-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.attach-btn:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
+}
+
+.attached-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 4px 0;
+}
+
+.attached-preview img {
+  height: 44px;
+  width: 44px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+
+.attached-name {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.attached-remove {
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 4px;
+  width: 24px;
+  height: 24px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.attached-remove:hover {
+  color: var(--down);
+  border-color: var(--down);
+}
+
+.msg-image {
+  display: block;
+  max-width: 260px;
+  max-height: 260px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  margin-bottom: 8px;
+}
+
 @media (max-width: 600px) {
   .msg {
     max-width: 92%;

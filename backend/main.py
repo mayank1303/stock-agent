@@ -91,6 +91,13 @@ MAX_TOOL_ROUNDS = 5  # safety cap: prevents a runaway tool-call loop
 # accuracy on our eval set, ~9s/question vs Claude's ~1-2s).
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "anthropic")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+# Separate vision-capable local model, used ONLY when an image is
+# attached (smart routing). Vision models add a vision encoder that
+# makes them ~30-60% slower on text than a text-only model of the same
+# size, so we don't route every text query through it - only image
+# ones. qwen2.5vl chosen over LLaVA for stronger structured-visual
+# (chart/table/document) understanding at the 7B size.
+OLLAMA_VISION_MODEL = os.environ.get("OLLAMA_VISION_MODEL", "qwen2.5vl:7b")
 # Always imported (not gated on LLM_PROVIDER default) since the
 # provider can now be chosen per-request from the UI, not just at
 # startup. If Ollama isn't installed, this import still succeeds (the
@@ -170,6 +177,12 @@ Trading book library (personal, private knowledge base):
   being accurate to what the books themselves would say.
 - If book_search returns no results, say so plainly (could mean no
   books ingested yet, or nothing relevant in the library).
+- COMPOUND QUESTIONS need BOTH book_search AND a stock tool - e.g.
+  "Does [stock] meet the [concept] criteria from my books" requires
+  book_search for the concept AND a stock tool for the real data, in
+  the same response. The phrase "from my books"/"per my books" always
+  means book_search must be called, even when the question is mostly
+  about a stock.
 """
 
 # Separate, more explicit/repetitive prompt for the local model.
@@ -240,6 +253,16 @@ asks if a stock meets them, answer DIRECTLY - check the real data and
 state clearly yes/no/why. This is personal research, not public
 advice, so be direct - but stay honest when data is ambiguous rather
 than forcing false confidence.
+
+COMPOUND QUESTIONS need BOTH a book tool AND a stock tool - calling
+only one is WRONG. Any question shaped like "Does [STOCK] meet the
+[CONCEPT] criteria from my books" or "Is [STOCK] a good [PATTERN] per
+my books" or "What would my books say about [STOCK]" REQUIRES:
+1. book_search for the concept/pattern (e.g. "trend-following criteria")
+2. A stock tool (stock_snapshot, stock_return, etc.) for the real data
+Do this even though the question sounds like it's "just" a stock
+question - the phrase "from my books" or "per my books" always means
+book_search must be called too, in the SAME response, not skipped.
 """
 
 TOOLS = [
@@ -524,18 +547,44 @@ class ChatRequest(BaseModel):
     question: str
     session_id: str = "default"
     provider: str | None = None  # "anthropic" or "ollama" - overrides LLM_PROVIDER env for this request
+    image_base64: str | None = None  # optional attached image (data portion only, no data: prefix)
+    image_media_type: str | None = None  # e.g. "image/png", "image/jpeg" - needed by Claude's API
 
 
-def _run_chat_stream_anthropic(question: str, session_id: str = "default"):
+def _run_chat_stream_anthropic(question: str, session_id: str = "default",
+                                image_base64: str | None = None, image_media_type: str | None = None):
     """
     Generator that yields SSE-formatted chunks. Handles Claude's
     stream -> tool_use -> execute -> continue streaming loop.
 
     Each yielded string is one SSE "event" line - the frontend will
     read these one at a time and append text chunks as they arrive.
+
+    If image_base64 is provided, the user message becomes multimodal
+    (image + text) using Claude's native vision support - Claude can
+    then "see" the chart/screenshot and combine it with tool calls
+    (e.g. book_search for relevant framework context).
     """
     messages = session_store.get_session(session_id)
-    messages.append({"role": "user", "content": question})
+
+    if image_base64:
+        # Multimodal message: image block first, then the text question.
+        messages.append({
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": image_media_type or "image/png",
+                        "data": image_base64,
+                    },
+                },
+                {"type": "text", "text": question},
+            ],
+        })
+    else:
+        messages.append({"role": "user", "content": question})
 
     yield f"data: {json.dumps({'type': 'provider', 'provider': 'anthropic', 'model': MODEL})}\n\n"
 
@@ -619,27 +668,73 @@ def _run_chat_stream_anthropic(question: str, session_id: str = "default"):
     yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
 
-def _run_chat_stream_ollama(question: str, session_id: str = "default"):
+def _run_chat_stream_ollama(question: str, session_id: str = "default", image_base64: str | None = None):
     """
     Local-model version of the agent loop, using Ollama instead of the
     Claude API - zero cost, runs entirely on your machine.
 
-    KNOWN SIMPLIFICATION vs the Anthropic path: tool-decision rounds are
-    non-streaming (same pattern proven reliable in eval_local_llm.py -
-    Ollama's streaming + tool-calling combination is less predictable
-    across models than Claude's). The final answer is delivered as one
-    complete chunk rather than animated word-by-word. Fully functional,
-    just not literally streamed for this provider - a deliberate, small
-    scope tradeoff rather than chasing fragile streaming behavior.
+    SMART ROUTING: if an image is attached, routes to the vision model
+    (OLLAMA_VISION_MODEL) instead of the text model - vision models are
+    ~30-60% slower on text, so we only use one when there's actually an
+    image to see. Text-only questions keep using the faster text model.
 
-    Uses a SEPARATE session namespace ("ollama:<id>") from the Anthropic
-    path so switching LLM_PROVIDER doesn't mix message formats from two
-    different APIs into one corrupted history.
+    IMAGE + TOOLS LIMITATION: when an image is present, this does a
+    direct vision analysis WITHOUT tool-calling. Ollama vision models'
+    support for simultaneous image input + tool-calling is unreliable
+    across models, so rather than ship something flaky, the image path
+    is deliberately scoped to "look at the image and answer" only. (The
+    Claude path CAN combine image + tools - that's one real advantage
+    of the paid provider, noted honestly for the user.)
+
+    KNOWN SIMPLIFICATION vs the Anthropic path: tool-decision rounds are
+    non-streaming (same pattern proven reliable in eval_local_llm.py).
     """
     ollama_session_id = f"ollama:{session_id}"
     messages = session_store.get_session(ollama_session_id)
     if not messages:
         messages = [{"role": "system", "content": OLLAMA_SYSTEM_PROMPT}]
+
+    # --- IMAGE PATH: vision model, direct analysis, no tools ---
+    if image_base64:
+        yield f"data: {json.dumps({'type': 'provider', 'provider': 'ollama', 'model': OLLAMA_VISION_MODEL})}\n\n"
+        # Ollama's API takes images as a list of base64 strings on the message.
+        vision_messages = [
+            {"role": "system", "content": "You are a trading assistant analyzing a chart or financial "
+                                           "image the user uploaded. Describe what you see (patterns, "
+                                           "levels, trends, notable features) and answer their question. "
+                                           "Be honest about what is and isn't clearly visible - don't "
+                                           "invent precise price numbers you can't actually read."},
+            {"role": "user", "content": question, "images": [image_base64]},
+        ]
+        try:
+            # An encoded image expands into a large block of visual tokens
+            # that, with the prompt, exceeds Ollama's default 4096-token
+            # context (confirmed via real testing: "4106 tokens exceeds
+            # the available context size 4096"). num_ctx raises the window
+            # so an image request fits. 8192 is a safe headroom for a
+            # single chart screenshot; very large/multiple images might
+            # need more, but this covers the normal case.
+            response = ollama.chat(
+                model=OLLAMA_VISION_MODEL,
+                messages=vision_messages,
+                options={"num_ctx": 8192},
+            )
+        except Exception as e:  # noqa: BLE001
+            yield f"data: {json.dumps({'type': 'error', 'message': f'Local vision model error: {e}. Is it pulled? (ollama pull qwen2.5vl:7b)'})}\n\n"
+            return
+        raw_msg = response["message"]
+        msg = raw_msg.model_dump() if hasattr(raw_msg, "model_dump") else dict(raw_msg)
+        answer = msg.get("content", "")
+        # Persist to text-model history as plain text (the image itself
+        # isn't stored - keeps history light and avoids format issues).
+        messages.append({"role": "user", "content": f"[uploaded an image] {question}"})
+        messages.append({"role": "assistant", "content": answer})
+        session_store.save_session(ollama_session_id, messages)
+        yield f"data: {json.dumps({'type': 'text', 'content': answer})}\n\n"
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        return
+
+    # --- TEXT PATH: normal tool-calling agent loop ---
     messages.append({"role": "user", "content": question})
 
     yield f"data: {json.dumps({'type': 'provider', 'provider': 'ollama', 'model': OLLAMA_MODEL})}\n\n"
@@ -688,14 +783,15 @@ def _run_chat_stream_ollama(question: str, session_id: str = "default"):
     yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
 
-def run_chat_stream(question: str, session_id: str = "default", provider: str | None = None):
+def run_chat_stream(question: str, session_id: str = "default", provider: str | None = None,
+                    image_base64: str | None = None, image_media_type: str | None = None):
     """Dispatches to the requested provider, falling back to the
     LLM_PROVIDER env default if the request didn't specify one."""
     active_provider = provider or LLM_PROVIDER
     if active_provider == "ollama":
-        yield from _run_chat_stream_ollama(question, session_id)
+        yield from _run_chat_stream_ollama(question, session_id, image_base64)
     else:
-        yield from _run_chat_stream_anthropic(question, session_id)
+        yield from _run_chat_stream_anthropic(question, session_id, image_base64, image_media_type)
 
 
 @app.post("/chat")
@@ -707,7 +803,8 @@ def chat(request: ChatRequest, http_request: Request):
             detail=f"Rate limit exceeded: max {RATE_LIMIT_MAX_REQUESTS} requests per {RATE_LIMIT_WINDOW_SECONDS}s.",
         )
     return StreamingResponse(
-        run_chat_stream(request.question, request.session_id, request.provider),
+        run_chat_stream(request.question, request.session_id, request.provider,
+                        request.image_base64, request.image_media_type),
         media_type="text/event-stream",
     )
 

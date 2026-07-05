@@ -102,6 +102,7 @@ export default function App() {
   });
 
   const [input, setInput] = useState("");
+  const [attachedImage, setAttachedImage] = useState(null); // {base64, mediaType, previewUrl, name}
   const [busy, setBusy] = useState(false);
   const [provider, setProvider] = useState(() => {
     try {
@@ -139,6 +140,7 @@ export default function App() {
   const bottomRef = useRef(null);
   const abortRef = useRef(null);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
   const requestStartRef = useRef(null);
 
   useEffect(() => {
@@ -219,16 +221,24 @@ export default function App() {
 
   async function send(question) {
     const raw = (question ?? input).trim();
-    if (!raw || busy) return;
-    const q = expandSlashCommand(raw);
+    // Allow sending if there's either text OR an attached image
+    if ((!raw && !attachedImage) || busy) return;
+    const q = expandSlashCommand(raw) || "Please analyze this image.";
+
+    const imageForRequest = attachedImage;
 
     setInput("");
+    setAttachedImage(null);
     setError(null);
     setBusy(true);
     setWaitingForFirst(true);
     setLastQuestion(raw);
     setShowAutocomplete(false);
-    setMessages((m) => [...m, { role: "user", content: raw }]);
+    setMessages((m) => [...m, {
+      role: "user",
+      content: raw || "(image)",
+      imagePreview: imageForRequest?.previewUrl || null,
+    }]);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -243,7 +253,13 @@ export default function App() {
         res = await fetch(`${API}/chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question: q, session_id: sessionId, provider }),
+          body: JSON.stringify({
+            question: q,
+            session_id: sessionId,
+            provider,
+            image_base64: imageForRequest?.base64 || null,
+            image_media_type: imageForRequest?.mediaType || null,
+          }),
           signal: controller.signal,
         });
       } catch (e) {
@@ -381,6 +397,35 @@ export default function App() {
     } catch {
       /* ignore */
     }
+  }
+
+  function handleImageSelect(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("Please select an image file (PNG, JPG, etc.).");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Image too large (max 5MB). Try a smaller screenshot or crop.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      // reader.result is a data URL: "data:image/png;base64,XXXX"
+      const dataUrl = reader.result;
+      const base64 = dataUrl.split(",")[1];
+      setAttachedImage({
+        base64,
+        mediaType: file.type,
+        previewUrl: dataUrl,
+        name: file.name,
+      });
+      setError(null);
+    };
+    reader.onerror = () => setError("Couldn't read that image file.");
+    reader.readAsDataURL(file);
+    e.target.value = ""; // reset so selecting the same file again re-triggers
   }
 
   function fmtArgs(args) {
@@ -581,6 +626,9 @@ export default function App() {
               </div>
             ) : (
               <div key={i} className={`msg ${m.role}`}>
+                {m.imagePreview && (
+                  <img src={m.imagePreview} alt="uploaded" className="msg-image" />
+                )}
                 {m.content}
               </div>
             )
@@ -614,46 +662,77 @@ export default function App() {
         </button>
       )}
 
-      <div className="input-bar">
-        <div className="input-wrap">
+      <div className="input-bar-wrap">
+        {attachedImage && (
+          <div className="attached-preview">
+            <img src={attachedImage.previewUrl} alt="attached" />
+            <span className="attached-name">{attachedImage.name}</span>
+            <button
+              className="attached-remove"
+              onClick={() => setAttachedImage(null)}
+              aria-label="Remove attached image"
+            >
+              ×
+            </button>
+          </div>
+        )}
+        <div className="input-bar">
           <input
-            ref={inputRef}
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value);
-              setShowAutocomplete(true);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                setShowAutocomplete(false);
-                send();
-              }
-            }}
-            onBlur={() => setTimeout(() => setShowAutocomplete(false), 150)}
-            placeholder="Ask about any NSE stock… (⌘K to focus, /compare, /screen)"
-            disabled={busy}
-            aria-label="Ask a stock question"
+            type="file"
+            accept="image/*"
+            ref={fileInputRef}
+            onChange={handleImageSelect}
+            style={{ display: "none" }}
           />
-          {showAutocomplete && autocompleteMatches.length > 0 && (
-            <div className="autocomplete">
-              {autocompleteMatches.map((t) => (
-                <button key={t.ticker} onMouseDown={() => applyAutocomplete(t.ticker)}>
-                  <span className="ac-ticker">{t.ticker}</span>
-                  <span className="ac-name">{t.name}</span>
-                </button>
-              ))}
-            </div>
+          <button
+            className="attach-btn"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={busy}
+            aria-label="Attach a chart image"
+            title="Attach a chart or screenshot"
+          >
+            +
+          </button>
+          <div className="input-wrap">
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={(e) => {
+                setInput(e.target.value);
+                setShowAutocomplete(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  setShowAutocomplete(false);
+                  send();
+                }
+              }}
+              onBlur={() => setTimeout(() => setShowAutocomplete(false), 150)}
+              placeholder={attachedImage ? "Ask about this chart… (optional)" : "Ask about any NSE stock… (⌘K to focus, /compare, /screen)"}
+              disabled={busy}
+              aria-label="Ask a stock question"
+            />
+            {showAutocomplete && autocompleteMatches.length > 0 && (
+              <div className="autocomplete">
+                {autocompleteMatches.map((t) => (
+                  <button key={t.ticker} onMouseDown={() => applyAutocomplete(t.ticker)}>
+                    <span className="ac-ticker">{t.ticker}</span>
+                    <span className="ac-name">{t.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {busy ? (
+            <button onClick={stopGenerating} className="stop-btn">
+              STOP
+            </button>
+          ) : (
+            <button onClick={() => send()} disabled={!input.trim() && !attachedImage}>
+              SEND
+            </button>
           )}
         </div>
-        {busy ? (
-          <button onClick={stopGenerating} className="stop-btn">
-            STOP
-          </button>
-        ) : (
-          <button onClick={() => send()} disabled={!input.trim()}>
-            SEND
-          </button>
-        )}
       </div>
     </div>
   );
